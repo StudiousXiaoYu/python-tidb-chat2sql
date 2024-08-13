@@ -14,13 +14,24 @@ from fastapi.templating import Jinja2Templates
 from llama_index.core import VectorStoreIndex, StorageContext
 from llama_index.core.base.response.schema import StreamingResponse as llamaStreamingResponse
 from llama_index.vector_stores.tidbvector import TiDBVectorStore
+from tidb_vector.integrations import TiDBVectorClient
 from llama_index.readers.web import SimpleWebPageReader
+from sentence_transformers import SentenceTransformer
+
+# print("Downloading and loading the embedding model...")
+# embed_model = SentenceTransformer("sentence-transformers/msmarco-MiniLM-L12-cos-v5", trust_remote_code=True)
+# embed_model_dims = embed_model.get_sentence_embedding_dimension()
+# from llama_index.llms.llama_api import LlamaAPI
+
+# api_key = "sk-*******"
+# llm = LlamaAPI(api_key=api_key)
 
 # 设置环境变量
-os.environ['OPENAI_API_KEY'] = 'sk-*******'
-os.environ['TIDB_HOST'] = 'gateway01.*******.shared.aws.tidbcloud.com'
-os.environ['TIDB_USERNAME'] = '****.root'
-os.environ['TIDB_PASSWORD'] = '****'
+os.environ['OPENAI_API_BASE'] = 'https://api.openai-hk.com/v1'
+os.environ['OPENAI_API_KEY'] = 'hk-q4tv1j1000040400a21d43d38a47af2e8782d6fdba8e42bb'
+os.environ['TIDB_HOST'] = 'gateway01.us-west-2.prod.aws.tidbcloud.com'
+os.environ['TIDB_USERNAME'] = 'u7UyJdBVCnHqhDV.root'
+os.environ['TIDB_PASSWORD'] = '9XAVMm2JMDDx1ITm'
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
