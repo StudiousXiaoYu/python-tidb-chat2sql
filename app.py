@@ -27,11 +27,11 @@ from sentence_transformers import SentenceTransformer
 # llm = LlamaAPI(api_key=api_key)
 
 # 设置环境变量
-os.environ['OPENAI_API_BASE'] = 'https://api.openai-hk.com/v1'
-os.environ['OPENAI_API_KEY'] = 'hk-q4tv1j1000040400a21d43d38a47af2e8782d6fdba8e42bb'
-os.environ['TIDB_HOST'] = 'gateway01.us-west-2.prod.aws.tidbcloud.com'
-os.environ['TIDB_USERNAME'] = 'u7UyJdBVCnHqhDV.root'
-os.environ['TIDB_PASSWORD'] = '9XAVMm2JMDDx1ITm'
+os.environ['OPENAI_API_BASE'] = ''
+os.environ['OPENAI_API_KEY'] =''
+os.environ['TIDB_HOST'] = ''
+os.environ['TIDB_USERNAME'] = ''
+os.environ['TIDB_PASSWORD'] = ''
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
