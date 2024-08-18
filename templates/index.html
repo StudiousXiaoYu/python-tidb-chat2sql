@@ -13,25 +13,82 @@
     <div id="root"></div>
     <script src="https://g.alicdn.com/code/npm/@ali/chatui-sdk/6.2.11/ChatSDK.js"></script>
     <script src="https://g.alicdn.com/code/npm/@ali/chatui-sdk/6.2.11/isvParser.js"></script>
-    <script src="//g.alicdn.com/chatui/icons/2.0.2/index.js"></script>
+    <script src="https://g.alicdn.com/chatui/icons/2.0.2/index.js"></script>
     <script>
         var bot = new ChatSDK({
         config: {
             navbar: {
-            title: '智能助理'
+                title: '智能助理'
             },
             robot: {
-            avatar: '//gw.alicdn.com/tfs/TB1U7FBiAT2gK0jSZPcXXcKkpXa-108-108.jpg'
+                avatar: '//gw.alicdn.com/tfs/TB1U7FBiAT2gK0jSZPcXXcKkpXa-108-108.jpg'
             },
             messages: [
-            {
-                code: 'text',
-                data: {
-                text: '智能助理为您服务，请问有什么可以帮您？'
+                {
+                    code: 'text',
+                    data: {
+                        text: '智能助理为您服务，请问有什么可以帮您？'
+                    }
                 }
-            }
-            ]
-        },
+            ],
+            sidebar: [
+                {
+                    code: 'sidebar-suggestion',
+                    data: [
+                    {
+                        label: '疫情问题',
+                        list: [
+                        '身边有刚从湖北来的人，如何报备',
+                        '接触过武汉人，如何处理？',
+                        '发烧或咳嗽怎么办？',
+                        '去医院就医时注意事项',
+                        '个人防护',
+                        '传播途径',
+                        '在家消毒',
+                        ],
+                    },
+                    {
+                        label: '法人问题',
+                        list: [
+                        '企业设立',
+                        '企业运行',
+                        '企业变更',
+                        '企业服务',
+                        '企业注销',
+                        '社会团体',
+                        '民办非企业',
+                        ],
+                    },
+                    ],
+                },
+                {
+                    code: 'sidebar-tool',
+                    title: '常用工具',
+                    data: [
+                    {
+                        name: '咨询表单',
+                        icon: 'clipboard-list',
+                        url: 'http://www.zjzxts.gov.cn/wsdt.do?method=suggest&xjlb=0&ymfl=1&uflag=1',
+                    },
+                    {
+                        name: '投诉举报',
+                        icon: 'exclamation-shield',
+                        url: 'http://www.zjzxts.gov.cn/wsdt.do?method=suggest&xjlb=1',
+                    },
+                    {
+                        name: '办事进度',
+                        icon: 'history',
+                        url: 'http://www.zjzwfw.gov.cn/zjzw/search/progress/query.do?webId=1',
+                    },
+                    ],
+                },
+                {
+                    code: 'sidebar-phone',
+                    title: '全省统一政务服务热线',
+                    data: ['12345'],
+                },
+            ],
+        }, 
         requests: {
             send: function (msg) {
             if (msg.type === 'text') {
@@ -39,7 +96,11 @@
                 url: 'http://127.0.0.1:3000/ask',
                 data: {
                     query: msg.content.text
-                }
+                },
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                    }
                 };
             }
             }
@@ -56,7 +117,7 @@
                                     '<p>阿里云官网链接是： https：//www.aliyun.com/ 或者是 https：//aliyun.com\n对话机器人 POC 环境地址是： http：//poc-console.alixiaomi.com：8081/\n</p>',
                                     contentType: 'RICH_TEXT',
                                     dataSource: 'doc',
-                                    docName: '链接',
+                                    docName: '123链接',
                                     number: 1,
                                     originNumber: 1,
                                     pagePos: [
@@ -71,21 +132,17 @@
                                     pageUrls: [
                                     'http://beebot-private-cn-shanghai-daily.oss-cn-shanghai.aliyuncs.com/doc2bot/media/publicDocStructure/docmind-20231115-29bd8a89d2f04b50a4bed7dd14286b75/convert-00000.png?Expires=1700118022&OSSAccessKeyId=LTAIIKAwZRXpwYMT&Signature=dYaQzcYwHM6XYDBDw3ydVzjFYiw%3D',
                                     ],
-                                    title: '链接',
+                                    title: '123文档',
                                     url: 'http://beebot-private-cn-shanghai-daily.oss-cn-shanghai.aliyuncs.com/doc2bot/2004/%E9%93%BE%E6%8E%A5.docx?Expires=1700118022&OSSAccessKeyId=LTAIIKAwZRXpwYMT&Signature=6gKSmodm4B%2BVqo8kQXi1UxlndQE%3D',
                                 },
                             ],
                         },
-                        content: res.data+"[1]",
+                        content: res.data,
                         sentenceList: [
                             {
                             content: res.data,
                             referNumber: 1,
                             },
-                        ],
-                        relatedQuestionList: [
-                            { content: '测试关联问1' },
-                            { content: '测试关联问2' },
                         ],
                         streamEnd: true,
                     }
