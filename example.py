@@ -255,8 +255,18 @@ def text_to_insert_by_example():
         embeddings=[doc["embedding"] for doc in documents],
         metadatas=[doc["metadata"] for doc in documents],
     )
+    
+    insert_sql1 = """INSERT INTO Students (first_name, last_name, dob, email, phone, create_user, update_user)
+VALUES 
+    ('张三', '张', '2001-05-21', 'zhangsan1@example.com', '12345678901', 'admin', 'admin'),
+    ('李四', '李', '2002-06-15', 'lisi2@example.com', '12345678902', 'admin', 'admin'),
+    ('王五', '王', '2003-07-20', 'wangwu3@example.com', '12345678903', 'admin', 'admin');"""
 
-    vector_store
+    
+    
+    with get_mysqlclient_connection(autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(insert_sql1)
     
 
 def print_result(query, result):
