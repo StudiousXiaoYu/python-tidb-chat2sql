@@ -1,52 +1,137 @@
-from sentence_transformers import SentenceTransformer
 import os
 import sys
 import click
+import json
 import uvicorn
-from fastapi import FastAPI, Request, Body
+from fastapi import FastAPI, Request, Body, File, UploadFile
+from fastapi.staticfiles import StaticFiles
 import uuid
+from pydantic import BaseModel
 from sqlalchemy import URL
 import logging
 from tidb_vector.integrations import TiDBVectorClient
-from dotenv import load_dotenv
 from llama_index.core.llms import ChatMessage
 from llama_index.llms.openai import OpenAI
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
+from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.core import VectorStoreIndex
+from typing import List, Optional, Dict, Any
+import MySQLdb
+from MySQLdb.cursors import Cursor
 
 # Load the connection string from the .env file
 # 设置环境变量
 # os.environ['OPENAI_API_BASE'] = ''
-# os.environ['OPENAI_API_KEY'] =''
+# os.environ['OPENAI_API_KEY'] =''  
 # os.environ['TIDB_HOST'] = ''
 # os.environ['TIDB_USERNAME'] = ''
 # os.environ['TIDB_PASSWORD'] = ''
 
-MAX_MESSAGES = 10  # 例如，我们想要数组最大长度为10
+
+# global
+embed_model = OpenAIEmbedding(model="text-embedding-3-large",dimensions=512,)
+llm = OpenAI()
+
+def get_mysqlclient_connection(autocommit:bool=True) -> MySQLdb.Connection:
+    db_conf = {
+        "host": os.getenv("TIDB_HOST", "127.0.0.1"),
+        "port": int(os.getenv("TIDB_PORT", "4000")),
+        "user": os.getenv("TIDB_USERNAME", "root"),
+        "password": os.getenv("TIDB_PASSWORD", ""),
+        "database": os.getenv("TIDB_DB_NAME", "test"),
+        "autocommit": autocommit
+    } 
+    db_conf["ssl_mode"] = "VERIFY_IDENTITY"
+    db_conf["ssl"] = {"ca": "./isrgrootx1.pem"}
+    return MySQLdb.connect(**db_conf)
+
+
+# 数据模型
+class PagePos(BaseModel):
+    height: int
+    pageId: str
+    width: int
+    x: int
+    y: int
+
+class Item(BaseModel):
+    content: str
+    contentType: str
+    dataSource: str
+    docName: str
+    number: int
+    originNumber: int
+    pagePos: List[PagePos]
+    title: str
+
+class AnswerReference(BaseModel):
+    itemList: List[Item]
+
+class Sentence(BaseModel):
+    content: str
+    referNumber: Optional[int] = None
+
+class ResponseData(BaseModel):
+    answerReference: Optional[AnswerReference] = None
+    content: str
+    sentenceList: List[Sentence]
+    streamEnd: bool
+
+MAX_MESSAGES = 50  # 例如，我们想要数组最大长度为10
 messages = []
+keywords = {"table": set(), "remark": set()}
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
 
 logger.info("Downloading and loading the embedding model...")
-embed_model = SentenceTransformer("sentence-transformers/msmarco-MiniLM-L12-cos-v5", trust_remote_code=True)
-embed_model_dims = embed_model.get_sentence_embedding_dimension()
+# embed_model = SentenceTransformer("sentence-transformers/msmarco-MiniLM-L12-cos-v5", trust_remote_code=True)
+# embed_model_dims = embed_model.get_sentence_embedding_dimension()
 
 def text_to_embedding(text):
     """Generates vector embeddings for the given text."""
-    embedding = embed_model.encode(text)
-    return embedding.tolist()
+    return embed_model.get_text_embedding(text)
 
 def generate_uuid():
     unique_id = uuid.uuid4()
     return str(unique_id)
 
 def add_message(message):
+    if len(messages) == 0:
+        my_content=f"""- Role: SQL语句生成专家
+                        - Background: 用户需要根据特定的表结构生成SQl语句。
+                        - Profile: 你是一位经验丰富的数据库管理员，擅长根据表结构快速生成精准的SQL语句。
+                        - Skills: 数据库管理、SQL语言、逻辑分析。
+                        - Goals: 设计一个能够根据用户给出的表结构自动生成pgSQL语句的流程。
+                        - Constrains: 确保生成的SQL语句符合postgresql的语法规则，且能够正确执行。
+                        - OutputFormat: 固定格式的文本输出，包含SQL语句和备注。
+                        - Workflow:
+                        1. 接收用户提供的参考表结构。
+                        2. 分析表结构，确定需要生成的SQL语句类型（如SELECT, INSERT, UPDATE, DELETE等）。
+                        3. 根据表结构和SQL语句类型，生成相应的sql语句。
+                        4. 如果存在关联表或特殊条件，提供备注说明。
+                        - Examples 1:
+                        Input: 生成用户表的查询语句
+                        表结构示例：用户表（user_id, username, email）
+                        SQL语句：SELECT * FROM users;
+                        备注：无。
+                        - Examples 2:
+                        Input: 看下用户表的表结构
+                        表结构示例：用户表（user_id, username, email）
+                        SQL语句：show table users;
+                        备注：用户表（user_id, username, email）。
+                """
+        messages.append(ChatMessage(
+                role="system", content = my_content
+            ))
     if len(messages) >= MAX_MESSAGES:
-        messages.pop(0)  # 移除第一个元素
+        messages.pop(1)  # 移除第一个元素
     messages.append(message)  # 添加新元素到末尾
+
 logger.info("Initializing TiDB Vector Store....")
+
 tidb_connection_url = URL(
     "mysql+pymysql",
     username=os.environ['TIDB_USERNAME'],
@@ -63,7 +148,7 @@ vector_store = TiDBVectorClient(
    # The connection string to the TiDB cluster.
    connection_string=tidb_connection_url,
    # The dimension of the vector generated by the embedding model.
-   vector_dimension=embed_model_dims,
+   vector_dimension=512,
    # Determine whether to recreate the table if it already exists.
    drop_existing_table=False,
 )
@@ -81,17 +166,8 @@ def text_to_insert_by_example():
                             update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
                             update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
                         );""",
-            "embedding": text_to_embedding("""CREATE TABLE Enrollments (
-                            id INT AUTO_INCREMENT PRIMARY KEY COMMENT '记录ID，自增主键',
-                            student_id INT COMMENT '学生ID（参考学生表中的ID）',
-                            course_id INT COMMENT '课程ID（参考课程表中的ID）',
-                            enroll_date DATE NOT NULL COMMENT '注册日期',
-                            create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                            create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
-                            update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
-                            update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
-                        );"""),
-            "metadata": {"remark": "学生-课程关联表（Enrollments）"},
+            "embedding": text_to_embedding("""学生-课程关联表结构, Enrollments's table structure"""),
+            "metadata": {"remark": "学生-课程关联表","table":"Enrollments"},
         },
         {
             "id": generate_uuid(),
@@ -104,16 +180,8 @@ def text_to_insert_by_example():
                         update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
                         update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
                     );""",
-            "embedding": text_to_embedding("""CREATE TABLE Courses (
-                        id INT AUTO_INCREMENT PRIMARY KEY COMMENT '课程ID，自增主键',
-                        course_name VARCHAR(100) NOT NULL COMMENT '课程名称',
-                        credits INT NOT NULL COMMENT '学分',
-                        create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                        create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
-                        update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
-                        update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
-                    );"""),
-            "metadata": {"remark": "课程信息表（Courses）"},
+            "embedding": text_to_embedding("""课程信息表结构，Courses's table structure"""),
+            "metadata": {"remark": "课程信息表","table":"Courses"},
         },
         {
             "id": generate_uuid(),
@@ -126,16 +194,8 @@ def text_to_insert_by_example():
                     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
                     update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
                 );""",
-            "embedding": text_to_embedding("""CREATE TABLE Classrooms (
-                    id INT AUTO_INCREMENT PRIMARY KEY COMMENT '教室ID，自增主键',
-                    room_number VARCHAR(20) UNIQUE NOT NULL COMMENT '教室房间号',
-                    capacity INT NOT NULL COMMENT '教室容量',
-                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                    create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
-                    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
-                    update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
-                );"""),
-            "metadata": {"remark": "教室信息表（Classrooms）"},
+            "embedding": text_to_embedding(""" 教室信息表结构，Classrooms's table structure"""),
+            "metadata": {"remark": "教室信息表","table":"Classrooms"},
         },
         {
             "id": generate_uuid(),
@@ -148,16 +208,8 @@ def text_to_insert_by_example():
                     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
                     update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
                 );""",
-            "embedding": text_to_embedding("""CREATE TABLE Classes (
-                    id INT AUTO_INCREMENT PRIMARY KEY COMMENT '班级ID，自增主键',
-                    class_name VARCHAR(50) NOT NULL COMMENT '班级名称',
-                    teacher_id INT COMMENT '教师ID（参考教师表中的ID）',
-                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                    create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
-                    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
-                    update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
-                );"""),
-            "metadata": {"remark": "班级信息表（Classes）"},
+            "embedding": text_to_embedding("""班级信息表结构，Classes's table structure"""),
+            "metadata": {"remark": "班级信息表","table":"Classes"},
         },
         {
             "id": generate_uuid(),
@@ -173,19 +225,8 @@ def text_to_insert_by_example():
                     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
                     update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
                 );""",
-            "embedding": text_to_embedding("""CREATE TABLE Students (
-                    id INT AUTO_INCREMENT PRIMARY KEY COMMENT '学生ID，自增主键',
-                    first_name VARCHAR(50) NOT NULL COMMENT '学生名字',
-                    last_name VARCHAR(50) NOT NULL COMMENT '学生姓氏',
-                    dob DATE NOT NULL COMMENT '出生日期',
-                    email VARCHAR(100) UNIQUE NULL COMMENT '学生电子邮件',
-                    phone VARCHAR(20) NULL COMMENT '学生电话',
-                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                    create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
-                    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
-                    update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
-                );"""),
-            "metadata": {"remark": "学生信息表（Students）"},
+            "embedding": text_to_embedding(""" 学生信息表结构，Students's table structure"""),
+            "metadata": {"remark": "学生信息表","table":"Students"},
         },
         {
             "id": generate_uuid(),
@@ -202,22 +243,11 @@ def text_to_insert_by_example():
                     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
                     update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
                 );""",
-            "embedding": text_to_embedding("""CREATE TABLE Teachers (
-                    id INT AUTO_INCREMENT PRIMARY KEY COMMENT '教师ID，自增主键',
-                    first_name VARCHAR(50) NOT NULL COMMENT '教师名字',
-                    last_name VARCHAR(50) NOT NULL COMMENT '教师姓氏',
-                    email VARCHAR(100) UNIQUE NOT NULL COMMENT '教师电子邮件',
-                    phone VARCHAR(20) NULL COMMENT '教师电话',
-                    hire_date DATE NOT NULL COMMENT '入职日期',
-                    department VARCHAR(50) NULL COMMENT '所在部门',
-                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-                    create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
-                    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
-                    update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
-                );"""),
-            "metadata": {"remark": "教师信息表（Teachers）"},
+            "embedding": text_to_embedding(""" 教师信息表结构，Teachers's table structure"""),
+            "metadata": {"remark": "教师信息表","table":"Teachers"},
         },
     ]
+
 
     vector_store.insert(
         ids=[doc["id"] for doc in documents],
@@ -226,14 +256,49 @@ def text_to_insert_by_example():
         metadatas=[doc["metadata"] for doc in documents],
     )
 
+    vector_store
+    
+
 def print_result(query, result):
-   print(f"Search result (\"{query}\"):")
+#    print(f"Search result (\"{result}\"):")
    resultStr = ""
+   htmlShow = ""
    for r in result:
       resultStr += f"- text: \"{r.document}\", distance: {r.distance}"
+      htmlShow += f"<p>- 文本: \"{r.document}\", 相似度: {r.distance}</p><br/><br/>"
+   return resultStr,htmlShow
+
+def gen_query(query):
+    # 如果没有关键词，则直接返回
+    if keywords == None:
+        return query
+    # 如果匹配到了关键词，则根据关键词进行过滤
+    result_keys = ""
+    falg = False
+    for keyword in keywords["remark"]:
+        if keyword in query:
+            falg = True
+            result_keys += f"{keyword}    "
+    for keyword in keywords["table"]:
+        if keyword in query:
+            falg = True
+            result_keys += f"{keyword}    "
+    gem_result = ""
+    html_show = ""
+    if falg:
+        logger.info(f"匹配到关键词：{result_keys}")
+        query_embedding = text_to_embedding(result_keys)
+        search_result = vector_store.query(query_vector=query_embedding)
+        gem_result,html_show = print_result(query, search_result)
+        query_result = f"""用户问题如下：{query}， 表结构参考片段如下：{gem_result}"""
+    else:
+        query_result = query
+    return query_result,gem_result,html_show
+
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
+app.mount(path='/static', app=StaticFiles(directory='./static'), name='static')
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -244,29 +309,99 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
 def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+@app.post("/uploadfile/")
+async def create_upload_file(file: UploadFile):
+    return {"filename": file.filename}
 
 @app.post('/ask')
 async def ask(query: str):
-    query_embedding = text_to_embedding(query)
-    search_result = vector_store.query(query_embedding, k=3)
-    gem_result = print_result(query, search_result)
-    my_content=f"""请你根据提供的知识库参考片段，回答用户的问题。如果提供的参考内容无法回答用户问题，请回复【该内容并未匹配任何内容，请维护相关知识点后再查询】。
+    #执行SQL
+    if "/execute " in query:
+       resp = handleSql(query)
+    else :
+        #执行查询
+        resp = handleQa(query)
+    
+    return JSONResponse(content=resp.dict())
+
+def handleSql(query):
+    query = query.replace("/execute ","")
+    if "drop" in query.lower():
+        logger.info("不支持drop语句")
+        return
+    elif "create" in query.lower():
+        logger.info("不支持create语句")
+        return
+    queryResult = ""
+    with get_mysqlclient_connection(autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            for item in cur.fetchall():
+                queryResult += f"{item}\n"
+                logger.info(item)
+    SQLmessages = []
+    query = f"""
+            请将一下SQL执行的结果使用markdown的表格形式返回给我，如果没有执行结果，请返回【本次执行结果无数据返回】：
+            用户的SQL：{query}
+            数据库执行结果：{queryResult}
+            返回示例：
+                本次执行结果如下，请查收：
+                | id | name | age |
+                | --- | --- | --- |
+                | 1 | 张三 | 18 |
+                | 2 | 李四 | 19 |
+                | 3 | 王五 | 20 |
             """
-    query = f"""用户问题如下：{query}， 知识库参考片段如下：{gem_result}"""
-    logger.info(query)
-    llm = OpenAI()
+    SQLmessages.append(ChatMessage(role="user", content=query))
+    result_content = llm.chat(SQLmessages).message.content
     add_message(ChatMessage(role="user", content=query))
-    messages.insert(0,ChatMessage(
-            role="system", content = my_content
-        ),)
+    add_message(ChatMessage(role="assistant", content=result_content))
+    resp = ResponseData(
+            content=result_content,
+            sentenceList=[
+                Sentence(content=result_content)
+            ],
+            streamEnd=True
+        )
+    return resp
+def handleQa(query):
+    query,gem_result,html_show = gen_query(query)
+    logger.info(query)
+    add_message(ChatMessage(role="user", content=query))
+    logger.info("messages:"+str(messages))
     result_content = llm.chat(messages).message.content
-    if gem_result :
-        result_content += "[1]"
-    resp = {
-        "data": result_content,
-        "link": gem_result
-    }
-    return JSONResponse(content=resp)
+    add_message(ChatMessage(role="assistant", content=result_content))
+    if gem_result != "":
+        resp = ResponseData(
+            answerReference=AnswerReference(
+                itemList=[
+                    Item(
+                        content=html_show,
+                        contentType='RICH_TEXT',
+                        dataSource='doc',
+                        docName='表结构知识库匹配详情',
+                        number=1,
+                        originNumber=1,
+                        pagePos=[PagePos(height=29, pageId='1', width=779, x=203, y=167)],
+                        title='表结构文档'
+                    )
+                ]
+            ),
+            content=result_content,
+            sentenceList=[
+                Sentence(content=result_content, referNumber=1)
+            ],
+            streamEnd=True
+        )
+    else :
+        resp = ResponseData(
+            content=result_content,
+            sentenceList=[
+                Sentence(content=result_content)
+            ],
+            streamEnd=True
+        )
+    return resp
 
 @click.group(context_settings={'max_content_width': 150})
 def cli():
@@ -277,6 +412,19 @@ def cli():
 @click.option('--port', default=3000, help="Port, default=3000")
 @click.option('--reload', is_flag=True, help="Enable auto-reload")
 def runserver(host, port, reload):
+    queryResult = vector_store.execute("SELECT meta FROM embedded_documents;")
+    # 将metadata里面的信息提取出来
+    documents = queryResult["result"]
+    logger.info(documents)
+    for doc_tuple in documents:
+        # 每个元组只有一个元素，所以直接取第一个
+        json_str = doc_tuple[0]
+        # 将JSON字符串转换为字典
+        data = json.loads(json_str)
+        # 提取remark和table，并添加到对应的集合中
+        keywords["remark"].add(data["remark"])
+        keywords["table"].add(data["table"])
+        logger.info(keywords)
     uvicorn.run(
         "__main__:app", host=host, port=port, reload=reload,
         log_level="debug", workers=1,
@@ -286,6 +434,7 @@ def runserver(host, port, reload):
 @cli.command()
 def prepare():
     text_to_insert_by_example()
+    
 
 
 if __name__ == '__main__':

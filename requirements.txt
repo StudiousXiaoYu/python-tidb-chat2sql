@@ -3,6 +3,11 @@ fastapi
 uvicorn
 Jinja2
 llama-index
+llama-index-core
 llama-index-readers-web
 llama-index-vector-stores-tidbvector
-llama_index.llms.llama_api
+llama-index-llms-llama_api
+llama-index-embeddings-openai
+tidb-vector
+python-multipart
+mysqlclient==2.2.1

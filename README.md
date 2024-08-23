@@ -1,10 +1,10 @@
 # python-tidb-chat2sql
-利用Python+tidb向量数据库制作文生SQL功能
+利用Python+tidb向量数据库制作文生SQL功能并提供相关检索数据查看,还可以执行SQL查询等能力。
 
 
-# LlamaIndex RAG Example with Simple UI
+# Simple UI
 
-This example demonstrates how to use the LlamaIndex and TiDB Serverless to build a simple RAG(Retrival-Augmented Generation) application with simple UI.
+本示例使用阿里开源的chatSDK 实现简单的UI
 
 ## Prerequisites
 
