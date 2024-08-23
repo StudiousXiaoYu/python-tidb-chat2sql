@@ -71,13 +71,13 @@ Here are all the components we are currently using: tidb-serverless, openai, tid
 
 When a user's query matches the stored table structure names in the knowledge base, a TIDB-vector search is performed, followed by an SQL knowledge base search. The retrieved content is then provided to OpenAI LLM for answering related SQL questions.
 
-### 示例
+### Example
 ![alt text](static/demo-1.png)
 
-## SQL执行
+## SQL execution
 
 After the user sends the /execute command, SQL execution will occur, and the result will be returned to the user. However, DML statements like drop and create cannot be used. Query statements should be used whenever possible.
 
-### 示例
+### Example
 
 ![alt text](static/demo-2.png)

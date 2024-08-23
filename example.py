@@ -29,7 +29,6 @@ from MySQLdb.cursors import Cursor
 # os.environ['TIDB_USERNAME'] = ''
 # os.environ['TIDB_PASSWORD'] = ''
 
-
 # global
 embed_model = OpenAIEmbedding(model="text-embedding-3-large",dimensions=512,)
 llm = OpenAI()
@@ -138,7 +137,7 @@ tidb_connection_url = URL(
     password=os.environ['TIDB_PASSWORD'],
     host=os.environ['TIDB_HOST'],
     port=4000,
-    database="test",
+    database=os.environ["TIDB_DB_NAME"],
     query={"ssl_verify_cert": True, "ssl_verify_identity": True},
 )
 
@@ -255,20 +254,134 @@ def text_to_insert_by_example():
         embeddings=[doc["embedding"] for doc in documents],
         metadatas=[doc["metadata"] for doc in documents],
     )
-    
-    insert_sql1 = """INSERT INTO Students (first_name, last_name, dob, email, phone, create_user, update_user)
-VALUES 
-    ('张三', '张', '2001-05-21', 'zhangsan1@example.com', '12345678901', 'admin', 'admin'),
-    ('李四', '李', '2002-06-15', 'lisi2@example.com', '12345678902', 'admin', 'admin'),
-    ('王五', '王', '2003-07-20', 'wangwu3@example.com', '12345678903', 'admin', 'admin');"""
+    logger.info("insert documents done")
 
+
+    logger.info("Teachers begin to create")
+    creat_sql = """
+    CREATE TABLE Teachers (
+                    id INT AUTO_INCREMENT PRIMARY KEY COMMENT '教师ID，自增主键',
+                    first_name VARCHAR(50) NOT NULL COMMENT '教师名字',
+                    last_name VARCHAR(50) NOT NULL COMMENT '教师姓氏',
+                    email VARCHAR(100) UNIQUE NOT NULL COMMENT '教师电子邮件',
+                    phone VARCHAR(20) NULL COMMENT '教师电话',
+                    hire_date DATE NOT NULL COMMENT '入职日期',
+                    department VARCHAR(50) NULL COMMENT '所在部门',
+                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                    create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
+                    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+                    update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
+                );
+    """
+    with get_mysqlclient_connection(autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(creat_sql)
+            logger.info("Teachers done")
+
+
+
+    logger.info("Students begin to create")
+    creat_sql = """
+    CREATE TABLE Students (
+                    id INT AUTO_INCREMENT PRIMARY KEY COMMENT '学生ID，自增主键',
+                    first_name VARCHAR(50) NOT NULL COMMENT '学生名字',
+                    last_name VARCHAR(50) NOT NULL COMMENT '学生姓氏',
+                    dob DATE NOT NULL COMMENT '出生日期',
+                    email VARCHAR(100) UNIQUE NULL COMMENT '学生电子邮件',
+                    phone VARCHAR(20) NULL COMMENT '学生电话',
+                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                    create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
+                    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+                    update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
+                );
+    """
+    with get_mysqlclient_connection(autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(creat_sql)
+            logger.info("Students done")
+
+    logger.info("Classes begin to create")
+    creat_sql = """
+    CREATE TABLE Classes (
+                    id INT AUTO_INCREMENT PRIMARY KEY COMMENT '班级ID，自增主键',
+                    class_name VARCHAR(50) NOT NULL COMMENT '班级名称',
+                    teacher_id INT COMMENT '教师ID（参考教师表中的ID）',
+                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                    create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
+                    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+                    update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
+                );
+    """
+    with get_mysqlclient_connection(autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(creat_sql)
+            logger.info("Classes done")
+
+    logger.info("Classrooms begin to create")
+    creat_sql = """
+    CREATE TABLE Classrooms (
+                    id INT AUTO_INCREMENT PRIMARY KEY COMMENT '教室ID，自增主键',
+                    room_number VARCHAR(20) UNIQUE NOT NULL COMMENT '教室房间号',
+                    capacity INT NOT NULL COMMENT '教室容量',
+                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                    create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
+                    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+                    update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
+                );
+    """
+    with get_mysqlclient_connection(autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(creat_sql)
+            logger.info("Classrooms done")
     
+    logger.info("Courses begin to create")
+    creat_sql = """
+    CREATE TABLE Courses (
+                        id INT AUTO_INCREMENT PRIMARY KEY COMMENT '课程ID，自增主键',
+                        course_name VARCHAR(100) NOT NULL COMMENT '课程名称',
+                        credits INT NOT NULL COMMENT '学分',
+                        create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                        create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
+                        update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+                        update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
+                    );
+    """
+    with get_mysqlclient_connection(autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(creat_sql)
+            logger.info("Courses done")
+
+    logger.info("Enrollments begin to create")
+    creat_sql = """
+    CREATE TABLE Enrollments (
+                            id INT AUTO_INCREMENT PRIMARY KEY COMMENT '记录ID，自增主键',
+                            student_id INT COMMENT '学生ID（参考学生表中的ID）',
+                            course_id INT COMMENT '课程ID（参考课程表中的ID）',
+                            enroll_date DATE NOT NULL COMMENT '注册日期',
+                            create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                            create_user VARCHAR(50) NOT NULL COMMENT '创建用户',
+                            update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
+                            update_user VARCHAR(50) NOT NULL COMMENT '更新用户'
+                        );
+    """
+    with get_mysqlclient_connection(autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(creat_sql)
+            logger.info("Enrollments done")
+
+    logger.info("init data")        
+    insert_sql1 = """INSERT INTO Students (first_name, last_name, dob, email, phone, create_user, update_user) VALUES 
+    ('ZhangSan', 'zhang', '2001-05-21', 'zhangsan1@example.com', '12345678901', 'admin', 'admin'),
+    ('LiSi', 'Li', '2002-06-15', 'lisi2@example.com', '12345678902', 'admin', 'admin'),
+    ('WangWu', 'Wang', '2003-07-20', 'wangwu3@example.com', '12345678903', 'admin', 'admin');
+    """
+
     
     with get_mysqlclient_connection(autocommit=True) as conn:
         with conn.cursor() as cur:
             cur.execute(insert_sql1)
+            logger.info("init data done")
     
-
 def print_result(query, result):
 #    print(f"Search result (\"{result}\"):")
    resultStr = ""
