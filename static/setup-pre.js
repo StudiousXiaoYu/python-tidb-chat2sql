@@ -48,7 +48,7 @@ var bot = new ChatSDK({
       send: function (msg) {
       if (msg.type === 'text') {
           return {
-          url: 'http://127.0.0.1:3000/ask',
+          url: '/ask',
           data: {
               query: msg.content.text
           },
